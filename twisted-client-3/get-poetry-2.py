@@ -49,18 +49,34 @@ for that to work.
     return map(parse_address, addresses)
 
 
+'''Exercise 1 Classes'''
 class PoetryProtocol(Protocol):
-
     poem = ''
 
     def dataReceived(self, data):
         self.poem += data
 
     def connectionLost(self, reason):
-        self.poemReceived(self.poem)
+        if self.delayedTimeout.active():
+            self.delayedTimeout.cancel()
+            self.poemReceived(self.poem)
 
     def poemReceived(self, poem):
         self.factory.poem_finished(poem)
+
+    def connectionMade(self):
+        self.delayedTimeout = reactor.callLater(7, self.timeout, Failure(TimeoutException))
+
+    def timeout(self, failure):
+        self.factory.errback(failure)
+        self.transport.loseConnection()
+
+
+class TimeoutException(Exception):
+    def __init__(self):
+        self.message = "timeout exception how exciting"
+    def __str__(self):
+        return repr(self.message)
 
 
 class PoetryClientFactory(ClientFactory):
@@ -97,7 +113,6 @@ def get_poetry(host, port, callback, errback):
 
 def poetry_main():
     addresses = parse_args()
-    print addresses
 
     from twisted.internet import reactor
 

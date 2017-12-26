@@ -3,7 +3,9 @@
 import optparse
 
 from twisted.internet.protocol import ServerFactory
-from twisted.protocols.basic import NetstringReceiver
+from twisted.protocols.basic import (NetstringReceiver,
+                                     Int32StringReceiver,
+                                     )
 
 
 def parse_args():
@@ -43,10 +45,23 @@ class TransformService(object):
     def cummingsify(self, poem):
         return poem.lower()
 
+    def xiaochen(self, poem):
+        if not poem:
+            return None
+        new_poem = ""
+        for i, c in enumerate(poem):
+            if i % 2:
+                new_poem += c.lower()
+            else:
+                new_poem += c.upper()
+        return new_poem
 
-class TransformProtocol(NetstringReceiver):
+
+class PoemPrecessMixin():
 
     def stringReceived(self, request):
+        print request
+
         if '.' not in request: # bad request
             self.transport.loseConnection()
             return
@@ -64,9 +79,15 @@ class TransformProtocol(NetstringReceiver):
         self.transport.loseConnection()
 
 
-class TransformFactory(ServerFactory):
+class TransformProtocol(PoemPrecessMixin, NetstringReceiver):
+    pass
 
-    protocol = TransformProtocol
+
+class TransformInt32StringProtocol(PoemPrecessMixin, Int32StringReceiver):
+    pass
+
+
+class TransformFactoryMixin():
 
     def __init__(self, service):
         self.service = service
@@ -85,6 +106,19 @@ class TransformFactory(ServerFactory):
     def xform_cummingsify(self, poem):
         return self.service.cummingsify(poem)
 
+    def xform_xiaochen(self, poem):
+        return self.service.xiaochen(poem)
+
+
+class TransformFactory(ServerFactory, TransformFactoryMixin):
+
+    protocol = TransformProtocol
+
+
+class TransformInt32StringFactory(ServerFactory, TransformFactoryMixin):
+
+    protocol = TransformInt32StringProtocol
+
 
 def main():
     options = parse_args()
@@ -93,12 +127,18 @@ def main():
 
     factory = TransformFactory(service)
 
+    int32string_factory = TransformInt32StringFactory(service)
+
     from twisted.internet import reactor
 
     port = reactor.listenTCP(options.port or 0, factory,
                              interface=options.iface)
 
+    port_int32 = reactor.listenTCP(options.port+1 or 0, int32string_factory,
+                             interface=options.iface)
+
     print 'Serving transforms on %s.' % (port.getHost(),)
+    print 'Serving int32 transforms on %s.' % (port_int32.getHost(),)
 
     reactor.run()
 

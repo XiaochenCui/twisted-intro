@@ -48,14 +48,38 @@ for that to work.
     return map(parse_address, addresses)
 
 
+class PoetryTimeoutError(Exception): pass
+
+
 class PoetryProtocol(Protocol):
 
     poem = ''
+
+    def connectionMade(self):
+        port = self.transport.getPeer().port
+        self.onTime = None
+        # poetry downloads on even numbered ports time out after 1 sec
+        # just another of the ways the universe is stacked against poetry
+        if not port % 2:
+            self.onTime = True
+            from twisted.internet import reactor
+            self.timer = reactor.callLater(3, self.timeout)
+
+    def timeout(self):
+        self.onTime = False
+        self.transport.loseConnection()
 
     def dataReceived(self, data):
         self.poem += data
 
     def connectionLost(self, reason):
+        if self.onTime is not None:
+            if self.onTime == True:
+                self.timer.cancel()
+            else:
+                err = PoetryTimeoutError('Evil timeout stole your poetry again!')
+                self.factory.deferred.errback(err)
+                return
         self.poemReceived(self.poem)
 
     def poemReceived(self, poem):
@@ -104,8 +128,8 @@ def poetry_main():
     def got_poem(poem):
         poems.append(poem)
 
-    def poem_failed(err):
-        print >>sys.stderr, 'Poem failed:', err
+    def poem_failed(err, host=None, port=None):
+        print >>sys.stderr, 'Poem failed on {host}:{port}'.format(host=host, port=port), err
         errors.append(err)
 
     def poem_done(_):
@@ -115,7 +139,11 @@ def poetry_main():
     for address in addresses:
         host, port = address
         d = get_poetry(host, port)
-        d.addCallbacks(got_poem, poem_failed)
+        errback_kwargs = {
+            'host': host,
+            'port': port,
+        }
+        d.addCallbacks(got_poem, poem_failed, errbackKeywords=errback_kwargs)
         d.addBoth(poem_done)
 
     reactor.run()
